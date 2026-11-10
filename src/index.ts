@@ -8,10 +8,12 @@ import { Server } from 'socket.io';
 import { initDb, query } from './db';
 
 const PORT = Number(process.env.PORT ?? 4010);
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('Falta la variable JWT_SECRET.');
+  process.exit(1);
+}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? '';
-// Solo para desarrollo: permite entrar con un nombre, sin Google. NUNCA en producción.
-const ALLOW_DEV_LOGIN = process.env.ALLOW_DEV_LOGIN === 'true';
 const ORIGINS = (process.env.CORS_ORIGINS ?? 'http://localhost:5301').split(',').map((s) => s.trim());
 const corsOrigin = ORIGINS.includes('*') ? true : ORIGINS;
 
@@ -20,7 +22,6 @@ const app = express();
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
-// ---------- helpers ----------
 const signToken = (uid: number) => jwt.sign({ uid }, JWT_SECRET, { expiresIn: '60d' });
 const verifyToken = (token: string): number => (jwt.verify(token, JWT_SECRET) as { uid: number }).uid;
 
@@ -56,7 +57,6 @@ async function upsertUser(sub: string, email: string | null, name: string | null
   return rows[0] as { id: number; name: string; picture: string | null };
 }
 
-// Express 4 no captura errores async; este envoltorio los convierte en respuestas 500.
 const h =
   (fn: (req: Request, res: Response) => Promise<unknown>) =>
   (req: Request, res: Response) =>
@@ -65,13 +65,10 @@ const h =
       res.status(500).json({ error: 'server error' });
     });
 
-// ---------- rutas ----------
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// El frontend lee de aquí qué métodos de login hay disponibles.
-app.get('/config', (_req, res) => res.json({ googleClientId: GOOGLE_CLIENT_ID || null, devLogin: ALLOW_DEV_LOGIN }));
+app.get('/config', (_req, res) => res.json({ googleClientId: GOOGLE_CLIENT_ID || null }));
 
-// Recibe el "credential" (ID token) de Google Identity Services y devuelve nuestro JWT.
 app.post(
   '/auth/google',
   h(async (req, res) => {
@@ -88,20 +85,8 @@ app.post(
   }),
 );
 
-app.post(
-  '/auth/dev',
-  h(async (req, res) => {
-    if (!ALLOW_DEV_LOGIN) return res.status(404).json({ error: 'not found' });
-    const name = String(req.body.name ?? '').trim().slice(0, 30);
-    if (!name) return res.status(400).json({ error: 'name required' });
-    const user = await upsertUser(`dev:${name.toLowerCase()}`, null, name, null);
-    res.json({ token: signToken(user.id), user });
-  }),
-);
-
 app.get('/couple', auth, h(async (_req, res) => res.json((await myCouple(res.locals.uid)) ?? null)));
 
-// La primera persona crea la mesa (será fuego); la segunda se une con el código (será agua).
 app.post(
   '/couple/create',
   auth,
@@ -114,7 +99,6 @@ app.post(
       try {
         created = (await query(`INSERT INTO couples (code) VALUES ($1) RETURNING id, code`, [makeCode()])).rows[0];
       } catch {
-        /* código repetido: reintenta */
       }
     }
     if (!created) return res.status(500).json({ error: 'could not create' });
@@ -140,7 +124,6 @@ app.post(
   }),
 );
 
-// Salir de la mesa. Si queda vacía se borra (con su progreso).
 app.post(
   '/couple/leave',
   auth,
@@ -219,8 +202,6 @@ app.post(
   }),
 );
 
-// ---------- tiempo real (Socket.IO) ----------
-// El servidor solo retransmite entre los dos miembros de la mesa.
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: corsOrigin } });
 
@@ -245,7 +226,6 @@ io.on('connection', async (socket) => {
   socket.emit('joined', { role: couple.role, code: couple.code, peerOnline });
   socket.to(room).emit('peer-joined');
 
-  // Posición del jugador, eventos del juego (gema, muerte, nivel completo) y emotes.
   for (const ev of ['state', 'event', 'emote']) {
     socket.on(ev, (payload) => socket.to(room).emit(ev, payload));
   }

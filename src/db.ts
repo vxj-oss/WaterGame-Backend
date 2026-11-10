@@ -1,8 +1,6 @@
 import { mkdirSync } from 'fs';
 import { Pool } from 'pg';
 
-// Con DATABASE_URL (Railway) usa Postgres real.
-// Sin DATABASE_URL (desarrollo local) usa PGlite: un Postgres embebido que guarda en ./.data
 interface Db {
   query(text: string, params?: unknown[]): Promise<{ rows: any[] }>;
   exec(sql: string): Promise<void>;
