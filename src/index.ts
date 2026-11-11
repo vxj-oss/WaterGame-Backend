@@ -69,6 +69,17 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/config', (_req, res) => res.json({ googleClientId: GOOGLE_CLIENT_ID || null }));
 
+app.get('/rtc-config', auth, (_req, res) => {
+  const iceServers: { urls: string | string[]; username?: string; credential?: string }[] = [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  ];
+  const urls = (process.env.TURN_URLS ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+  if (urls.length && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+    iceServers.push({ urls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+  }
+  res.json({ iceServers });
+});
+
 app.post(
   '/auth/google',
   h(async (req, res) => {
